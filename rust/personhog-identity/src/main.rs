@@ -222,10 +222,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let service = PersonHogIdentityService::new(storage, property_writer, config.request_limits());
     // Separate proto service co-served on the same server so lifecycle
     // callers are insulated from any future split.
-    let lifecycle_service = PersonHogLifecycleService::new(engine);
+    let lifecycle_service = PersonHogLifecycleService::new(
+        engine,
+        storage.clone(),
+        property_writer.clone(),
+        MergeDriver::new(property_writer.clone()),
+    );
+    let service = PersonHogIdentityService::new(storage, property_writer, config.request_limits());
 
     let grpc_addr = config.grpc_address;
     let keepalive_interval = config.grpc_keepalive_interval();

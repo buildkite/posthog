@@ -11,6 +11,7 @@ use tonic::Request;
 use uuid::Uuid;
 
 use personhog_identity::lifecycle::delete::SEAL_VERSION_MARGIN;
+use personhog_identity::lifecycle::merge::MergeDriver;
 use personhog_identity::lifecycle::PersonHogLifecycleService;
 use personhog_identity::storage::{IdentityStorage, PersonStub, StubOutcome};
 use personhog_proto::personhog::lifecycle::v1::person_hog_lifecycle_server::PersonHogLifecycle;
@@ -19,7 +20,12 @@ use personhog_proto::personhog::lifecycle::v1::{DeletePersonOutcome, DeletePerso
 /// Storage-assertion helpers used only by this test binary.
 impl TestContext {
     fn lifecycle_service(&self) -> PersonHogLifecycleService {
-        PersonHogLifecycleService::new(Arc::new(self.engine()))
+        PersonHogLifecycleService::new(
+            Arc::new(self.engine()),
+            self.storage.clone(),
+            Arc::new(common::UnusedLeader),
+            MergeDriver::new(Arc::new(common::UnusedLeader)),
+        )
     }
 
     /// (is_deleted, version, properties) of a person row.

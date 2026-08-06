@@ -1,3 +1,5 @@
+mod common;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +7,7 @@ use sqlx::postgres::PgPoolOptions;
 use tonic::{Code, Request};
 
 use personhog_identity::lifecycle::engine::{Engine, EngineConfig};
+use personhog_identity::lifecycle::merge::MergeDriver;
 use personhog_identity::lifecycle::validation::MAX_DELETE_BATCH_SIZE;
 use personhog_identity::lifecycle::PersonHogLifecycleService;
 use personhog_proto::personhog::lifecycle::v1::person_hog_lifecycle_server::PersonHogLifecycle;
@@ -33,7 +36,12 @@ async fn delete_status(request: DeletePersonsRequest) -> Code {
             attempt_alert_threshold: 5,
         },
     ));
-    let service = PersonHogLifecycleService::new(engine);
+    let service = PersonHogLifecycleService::new(
+        engine,
+        std::sync::Arc::new(common::UnusedStorage),
+        std::sync::Arc::new(common::UnusedLeader),
+        MergeDriver::new(std::sync::Arc::new(common::UnusedLeader)),
+    );
     service
         .delete_persons(Request::new(request))
         .await
