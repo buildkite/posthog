@@ -12456,6 +12456,12 @@ export namespace Schemas {
       BigQuery: 'BigQuery',
     } as const;
 
+    export interface Billing {
+      /** @maxLength 100 */
+      plan: string;
+      billing_limit: number;
+    }
+
     /**
      * * `posthog_health_check` - PostHog health check
      * * `posthog_onboarding` - PostHog onboarding
@@ -46371,6 +46377,15 @@ export namespace Schemas {
       results: BatchImportSupportList[];
     }
 
+    export interface PaginatedBillingList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: Billing[];
+    }
+
     export interface PaginatedBriefConfigList {
       count: number;
       /** @nullable */
@@ -52612,6 +52627,12 @@ export namespace Schemas {
       /** @nullable */
       readonly display_status_message?: string | null;
       readonly import_config?: unknown;
+    }
+
+    export interface PatchedBilling {
+      /** @maxLength 100 */
+      plan?: string;
+      billing_limit?: number;
     }
 
     export interface PatchedBriefConfig {
@@ -79198,6 +79219,73 @@ export namespace Schemas {
       /** The span call-tree aggregation query to execute. */
       query: _TracingTreeQueryBody;
     }
+
+    export type BillingListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type BillingSpendRetrieveParams = {
+    /**
+     * @nullable
+     */
+    breakdowns?: string | null;
+    /**
+     * @nullable
+     */
+    end_date?: string | null;
+    /**
+     * @nullable
+     */
+    interval?: string | null;
+    /**
+     * @nullable
+     */
+    start_date?: string | null;
+    /**
+     * @nullable
+     */
+    team_ids?: string | null;
+    /**
+     * Comma-separated usage type identifiers to filter on. Valid values: event_count_in_period, enhanced_persons_event_count_in_period, group_analytics, recording_count_in_period, mobile_recording_count_in_period, billable_feature_flag_requests_count_in_period, exceptions_captured_in_period, survey_responses_count_in_period, ai_event_count_in_period, rows_synced_in_period, free_historical_rows_synced_in_period, data_pipelines, cdp_billable_invocations_in_period, rows_exported_in_period, ai_credits_used_in_period, workflow_emails_sent_in_period, workflow_billable_invocations_in_period, logs_mb_in_period. E.g. "event_count_in_period,recording_count_in_period". Omit for all types.
+     * @nullable
+     */
+    usage_types?: string | null;
+    };
+
+    export type BillingUsageRetrieveParams = {
+    /**
+     * @nullable
+     */
+    breakdowns?: string | null;
+    /**
+     * @nullable
+     */
+    end_date?: string | null;
+    /**
+     * @nullable
+     */
+    interval?: string | null;
+    /**
+     * @nullable
+     */
+    start_date?: string | null;
+    /**
+     * @nullable
+     */
+    team_ids?: string | null;
+    /**
+     * Comma-separated usage type identifiers to filter on. Valid values: event_count_in_period, enhanced_persons_event_count_in_period, group_analytics, recording_count_in_period, mobile_recording_count_in_period, billable_feature_flag_requests_count_in_period, exceptions_captured_in_period, survey_responses_count_in_period, ai_event_count_in_period, rows_synced_in_period, free_historical_rows_synced_in_period, data_pipelines, cdp_billable_invocations_in_period, rows_exported_in_period, ai_credits_used_in_period, workflow_emails_sent_in_period, workflow_billable_invocations_in_period, logs_mb_in_period. E.g. "event_count_in_period,recording_count_in_period". Omit for all types.
+     * @nullable
+     */
+    usage_types?: string | null;
+    };
 
     export type CohortsStaffListParams = {
     /**
