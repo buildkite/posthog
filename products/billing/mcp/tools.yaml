@@ -42,6 +42,7 @@ tools:
     billing-list:
         operation: billing_list
         enabled: true
+        feature_flag: billing-mcp-read-tools
         scopes:
             - billing:read
         annotations:
@@ -113,6 +114,7 @@ tools:
     billing-spend-retrieve:
         operation: billing_spend_retrieve
         enabled: true
+        feature_flag: billing-mcp-read-tools
         scopes:
             - billing:read
         annotations:
@@ -161,6 +163,7 @@ tools:
     billing-usage-retrieve:
         operation: billing_usage_retrieve
         enabled: true
+        feature_flag: billing-mcp-read-tools
         scopes:
             - billing:read
         annotations:
