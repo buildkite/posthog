@@ -20,7 +20,6 @@ export const AGENT_USE_CASE_SCOPES = [
     'approvals:write',
     'batch_export:read',
     'batch_export:write',
-    'billing:read',
     'business_knowledge:read',
     'business_knowledge:write',
     'canvas:read',

@@ -8,14 +8,7 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * PostHog API - generated
  * OpenAPI spec version: 1.0.0
  */
-import type {
-    BillingApi,
-    BillingListParams,
-    BillingSpendRetrieveParams,
-    BillingUsageRetrieveParams,
-    PaginatedBillingListApi,
-    PatchedBillingApi,
-} from './api.schemas'
+import type { BillingApi, BillingListParams, PaginatedBillingListApi, PatchedBillingApi } from './api.schemas'
 
 export const getBillingListUrl = (params?: BillingListParams) => {
     const normalizedParams = new URLSearchParams()
@@ -198,28 +191,15 @@ export const billingPortalRetrieve = async (options?: RequestInit): Promise<void
     })
 }
 
-export const getBillingSpendRetrieveUrl = (params?: BillingSpendRetrieveParams) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0 ? `/api/billing/spend/?${stringifiedParams}` : `/api/billing/spend/`
+export const getBillingSpendRetrieveUrl = () => {
+    return `/api/billing/spend/`
 }
 
 /**
  * Endpoint to fetch spend data (proxy to billing service).
  */
-export const billingSpendRetrieve = async (
-    params?: BillingSpendRetrieveParams,
-    options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getBillingSpendRetrieveUrl(params), {
+export const billingSpendRetrieve = async (options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getBillingSpendRetrieveUrl(), {
         ...options,
         method: 'GET',
     })
@@ -280,25 +260,12 @@ export const billingTrialsCancelCreate = async (billingApi: BillingApi, options?
     })
 }
 
-export const getBillingUsageRetrieveUrl = (params?: BillingUsageRetrieveParams) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0 ? `/api/billing/usage/?${stringifiedParams}` : `/api/billing/usage/`
+export const getBillingUsageRetrieveUrl = () => {
+    return `/api/billing/usage/`
 }
 
-export const billingUsageRetrieve = async (
-    params?: BillingUsageRetrieveParams,
-    options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getBillingUsageRetrieveUrl(params), {
+export const billingUsageRetrieve = async (options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getBillingUsageRetrieveUrl(), {
         ...options,
         method: 'GET',
     })
