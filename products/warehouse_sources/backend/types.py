@@ -1324,6 +1324,8 @@ class ExternalDataSourceType(models.TextChoices):
     WIX = "Wix", "Wix"
     SEVALLA = "Sevalla", "Sevalla"
     MOTION = "Motion", "Motion"
+    WHMCS = "WHMCS", "WHMCS"
+    MSG91 = "MSG91", "MSG91"
 
 
 # Maps a source type to the direct-SQL engine that can query it live. A source type is only

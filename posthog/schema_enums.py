@@ -2475,6 +2475,8 @@ class ExternalDataSourceType(StrEnum):
     WIX = "Wix"
     SEVALLA = "Sevalla"
     MOTION = "Motion"
+    WHMCS = "WHMCS"
+    MSG91 = "MSG91"
 
 
 class ExternalQueryErrorCode(StrEnum):
