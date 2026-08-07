@@ -2648,6 +2648,8 @@ export interface CredentialApi {
  * * `Wix` - Wix
  * * `Sevalla` - Sevalla
  * * `Motion` - Motion
+ * * `WHMCS` - WHMCS
+ * * `MSG91` - MSG91
  */
 export type ExternalDataSourceTypeEnumApi =
     (typeof ExternalDataSourceTypeEnumApi)[keyof typeof ExternalDataSourceTypeEnumApi]
@@ -3935,6 +3937,8 @@ export const ExternalDataSourceTypeEnumApi = {
     Wix: 'Wix',
     Sevalla: 'Sevalla',
     Motion: 'Motion',
+    Whmcs: 'WHMCS',
+    Msg91: 'MSG91',
 } as const
 
 export interface SimpleExternalDataSourceSerializersApi {
