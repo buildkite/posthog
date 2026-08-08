@@ -86,6 +86,7 @@ Add it when any of these hold:
 - When a versioned source starts consuming the discovery `api_version` parameter, add the vendor's version-rejection error signature to `get_non_retryable_errors` — otherwise a retired pin turns the ~6h discovery cadence into a permanent retry/error loop with no user-facing surface.
 - A version bump can change the auth scheme, not just the wire format. Then the source config needs both credential shapes as optional fields, auth construction dispatches on the resolved version, and `validate_credentials` enforces the pair that version needs — form-level `required` can't express "depends on the pin".
 - When the vendor renames a collection between versions, keep the schema/table name set identical across versions and put the rename in a per-version path on the endpoint config — otherwise discovery diffs orphan the table on repin.
+- The shared REST framework only binds a resolved parent field into a child resource's URL **path**, not its query string (`_bind_path_params` raises "Resolve query params not supported yet"). If a new version scopes a fan-out child by a query param where the old version used a path segment, the dependent-resource `{"type": "resolve"}` machinery can't express it — iterate the parent ids explicitly in the source and bake each id into the child's params (or POST body) instead.
 
 ## Self-improvement
 
