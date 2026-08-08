@@ -28,6 +28,19 @@ export interface PatchedBillingApi {
     billing_limit?: number
 }
 
+export interface BillingPeriodResponseApi {
+    /**
+     * Start of the organization's current billing period, or null when billing has not synced a period.
+     * @nullable
+     */
+    current_period_start: string | null
+    /**
+     * End of the organization's current billing period, or null when billing has not synced a period.
+     * @nullable
+     */
+    current_period_end: string | null
+}
+
 export type BillingListParams = {
     /**
      * Number of results to return per page.

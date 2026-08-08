@@ -8,7 +8,13 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * PostHog API - generated
  * OpenAPI spec version: 1.0.0
  */
-import type { BillingApi, BillingListParams, PaginatedBillingListApi, PatchedBillingApi } from './api.schemas'
+import type {
+    BillingApi,
+    BillingListParams,
+    BillingPeriodResponseApi,
+    PaginatedBillingListApi,
+    PatchedBillingApi,
+} from './api.schemas'
 
 export const getBillingListUrl = (params?: BillingListParams) => {
     const normalizedParams = new URLSearchParams()
@@ -177,6 +183,20 @@ export const billingLicensePartialUpdate = async (
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(patchedBillingApi),
+    })
+}
+
+export const getBillingPeriodRetrieveUrl = () => {
+    return `/api/billing/period/`
+}
+
+/**
+ * @summary Get the current organization billing period
+ */
+export const billingPeriodRetrieve = async (options?: RequestInit): Promise<BillingPeriodResponseApi> => {
+    return apiMutator<BillingPeriodResponseApi>(getBillingPeriodRetrieveUrl(), {
+        ...options,
+        method: 'GET',
     })
 }
 
