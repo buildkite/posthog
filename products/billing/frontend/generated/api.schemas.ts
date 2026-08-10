@@ -53,16 +53,16 @@ export interface BillingOverviewResponseApi {
     never_drop_data?: boolean
 }
 
-export interface PatchedBillingApi {
-    /** @maxLength 100 */
-    plan?: string
-    billing_limit?: number
-}
-
 export interface BillingApi {
     /** @maxLength 100 */
     plan: string
     billing_limit: number
+}
+
+export interface PatchedBillingApi {
+    /** @maxLength 100 */
+    plan?: string
+    billing_limit?: number
 }
 
 export interface BillingPeriodResponseApi {
@@ -108,6 +108,7 @@ export interface BillingTimeSeriesResponseApi {
     team_id_options?: number[]
     next?: string
 }
+
 export type BillingSpendRetrieveParams = {
     /**
      * JSON-encoded array of breakdown dimensions. Valid values are "type" and "team", for example ["type","team"]. Omit for a single aggregate series.
