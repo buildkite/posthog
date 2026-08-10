@@ -8,33 +8,14 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * PostHog API - generated
  * OpenAPI spec version: 1.0.0
  */
-import type {
-    BillingApi,
-    BillingListParams,
-    BillingPeriodResponseApi,
-    PaginatedBillingListApi,
-    PatchedBillingApi,
-} from './api.schemas'
+import type { BillingApi, BillingOverviewResponseApi, BillingPeriodResponseApi, PatchedBillingApi } from './api.schemas'
 
-export const getBillingListUrl = (params?: BillingListParams) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0 ? `/api/billing/?${stringifiedParams}` : `/api/billing/`
+export const getBillingListUrl = () => {
+    return `/api/billing/`
 }
 
-export const billingList = async (
-    params?: BillingListParams,
-    options?: RequestInit
-): Promise<PaginatedBillingListApi> => {
-    return apiMutator<PaginatedBillingListApi>(getBillingListUrl(params), {
+export const billingList = async (options?: RequestInit): Promise<BillingOverviewResponseApi> => {
+    return apiMutator<BillingOverviewResponseApi>(getBillingListUrl(), {
         ...options,
         method: 'GET',
     })
