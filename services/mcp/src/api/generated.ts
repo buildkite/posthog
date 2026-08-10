@@ -12573,7 +12573,7 @@ export namespace Schemas {
     export interface BillingTimeSeriesResponse {
       status?: string;
       type?: string;
-      customer_id?: string;
+      customer_id?: number;
       results: BillingTimeSeriesPoint[];
       team_id_options?: number[];
       next?: string;
