@@ -21,7 +21,7 @@ DevStackImageBakeOutcome = Literal["succeeded", "bake_failed", "failed", "dispat
 StreamConnectionOutcome = Literal["completed", "stream_error", "unavailable", "client_disconnect", "rotated"]
 _ALLOWED_MODES = {"background", "interactive"}
 _ALLOWED_RUN_SOURCES = {"manual", "signal_report"}
-_ALLOWED_RUNTIME_ADAPTERS = {"claude", "codex"}
+_ALLOWED_RUNTIME_ADAPTERS = {"claude", "codex", "pi"}
 
 
 TASK_RUN_CREATED_TOTAL = Counter(
@@ -244,6 +244,24 @@ def _failure_metric_label(value: object | None) -> str:
     return label[:100]
 
 
+def _effective_runtime_adapter_label(task_run: "TaskRun", state: dict) -> str:
+    """Return the harness that executes the run.
+
+    Keep the existing runtime_adapter label name for dashboard compatibility. ACP runs can omit
+    runtime_adapter to select the default Claude harness. Pi runs do not use an ACP adapter.
+    """
+    configured_adapter = state.get("runtime_adapter")
+    if configured_adapter is not None:
+        return _bounded_metric_label(configured_adapter, _ALLOWED_RUNTIME_ADAPTERS)
+
+    task_runtime = _metric_label(getattr(task_run.task, "runtime", None))
+    if task_runtime == "pi":
+        return "pi"
+    if task_runtime == "acp":
+        return "claude"
+    return "unknown"
+
+
 def _task_run_labels(task_run: "TaskRun | None") -> dict[str, str]:
     if task_run is None:
         return {
@@ -261,7 +279,7 @@ def _task_run_labels(task_run: "TaskRun | None") -> dict[str, str]:
         "run_environment": _metric_label(task_run.environment),
         "mode": _bounded_metric_label(state.get("mode"), _ALLOWED_MODES),
         "run_source": _bounded_metric_label(state.get("run_source"), _ALLOWED_RUN_SOURCES),
-        "runtime_adapter": _bounded_metric_label(state.get("runtime_adapter"), _ALLOWED_RUNTIME_ADAPTERS),
+        "runtime_adapter": _effective_runtime_adapter_label(task_run, state),
         "prewarmed": "true" if state.get("prewarmed") else "false",
     }
 

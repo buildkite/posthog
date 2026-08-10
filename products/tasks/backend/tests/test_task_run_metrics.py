@@ -85,13 +85,38 @@ class TestTaskRunMetrics(TestCase):
 
         assert _sample_value("posthog_tasks_task_run_created_total", labels) == before + 1
 
+    @parameterized.expand(
+        [
+            ("default_acp", Task.Runtime.ACP, "background", "claude"),
+            ("pi", Task.Runtime.PI, "unknown", "pi"),
+        ]
+    )
+    def test_create_run_labels_effective_runtime(
+        self, _name: str, task_runtime: str, expected_mode: str, expected_runtime_adapter: str
+    ) -> None:
+        self.task.runtime = task_runtime
+        self.task.save(update_fields=["runtime"])
+        labels = {
+            "origin_product": "user_created",
+            "run_environment": "cloud",
+            "mode": expected_mode,
+            "run_source": "unknown",
+            "runtime_adapter": expected_runtime_adapter,
+            "prewarmed": "false",
+        }
+        before = _sample_value("posthog_tasks_task_run_created_total", labels)
+
+        self.task.create_run(environment=TaskRun.Environment.CLOUD)
+
+        assert _sample_value("posthog_tasks_task_run_created_total", labels) == before + 1
+
     def test_prewarmed_run_created_carries_prewarmed_true_label(self) -> None:
         labels = {
             "origin_product": "user_created",
             "run_environment": "cloud",
             "mode": "interactive",
             "run_source": "unknown",
-            "runtime_adapter": "unknown",
+            "runtime_adapter": "claude",
             "prewarmed": "true",
         }
         before = _sample_value("posthog_tasks_task_run_created_total", labels)
@@ -171,7 +196,7 @@ class TestTaskRunMetrics(TestCase):
             "run_environment": "cloud",
             "mode": "background",
             "run_source": "unknown",
-            "runtime_adapter": "unknown",
+            "runtime_adapter": "claude",
             "prewarmed": "false",
         }
         labels_by_outcome = [
