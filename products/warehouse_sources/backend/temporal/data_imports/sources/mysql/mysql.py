@@ -1439,11 +1439,16 @@ class MySQLImplementation(SQLSourceImplementation[MySQLSourceConfig, pymysql.Con
         enabled_columns = inputs.enabled_columns
         row_filters = inputs.row_filters
 
-        def _discover_metadata() -> tuple[list[str] | None, pa.Schema, int, PartitionSettings | None, int]:
+        def _discover_metadata() -> tuple[list[str] | None, bool, pa.Schema, int, PartitionSettings | None, int]:
             with self.connect(config) as connection:
                 with connection.cursor() as cursor:
                     primary_keys = self.get_primary_keys_for_table(cursor, schema, table_name)
                     full_table = self.get_table_metadata(cursor, schema, table_name)
+
+                    # Whether the database itself declared these as the primary key, as opposed to
+                    # the `id` guess below. Only a declared PK is guaranteed NOT NULL, which is what
+                    # keyset pagination needs to seek past every page (see `resolve_keyset_eligibility`).
+                    primary_keys_are_declared = primary_keys is not None
 
                     # Resolve PKs before the projection so probe/sample queries match the streaming SELECT.
                     if primary_keys is None and "id" in full_table:
@@ -1473,13 +1478,13 @@ class MySQLImplementation(SQLSourceImplementation[MySQLSourceConfig, pymysql.Con
                         if should_use_incremental_field
                         else None
                     )
-            return primary_keys, arrow_schema, chunk_size, partition_settings, rows_to_sync
+            return primary_keys, primary_keys_are_declared, arrow_schema, chunk_size, partition_settings, rows_to_sync
 
         # A PlanetScale/Vitess tablet can be momentarily unavailable even once the vtgate
         # handshake succeeds, so retry the whole metadata-discovery block (reopening the
         # connection) on a transient `code = Unavailable` rather than failing setup on the
         # first blip — see `_retry_on_transient_tablet_unavailable`.
-        primary_keys, arrow_schema, chunk_size, partition_settings, rows_to_sync = (
+        primary_keys, primary_keys_are_declared, arrow_schema, chunk_size, partition_settings, rows_to_sync = (
             _retry_on_transient_tablet_unavailable(_discover_metadata, logger)
         )
 
@@ -1491,6 +1496,7 @@ class MySQLImplementation(SQLSourceImplementation[MySQLSourceConfig, pymysql.Con
             primary_keys=primary_keys,
             arrow_schema=arrow_schema,
             should_use_incremental_field=should_use_incremental_field,
+            primary_key_is_declared=primary_keys_are_declared,
         )
         keyset_column = eligibility.column
         if keyset_column is None:

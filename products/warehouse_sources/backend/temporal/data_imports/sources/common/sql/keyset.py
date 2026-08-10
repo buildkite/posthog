@@ -12,10 +12,10 @@ fresh pod resumes from that key instead of the start. Each batch is an independe
 with autocommit so no read view or metadata lock is held across the whole load — so the read can also
 yield to a draining worker between batches.
 
-Eligibility is deliberately narrow (see `resolve_keyset_eligibility`): exactly one primary-key column
-of an orderable, non-nullable type. Composite keys (per-dialect row-value comparison) and keyless
-tables stay on the single-cursor path, and report why via `KeysetEligibility.reason` so the ineligible
-share is measurable before the approach is extended to other dialects.
+Eligibility is deliberately narrow (see `resolve_keyset_eligibility`): exactly one database-declared
+primary-key column of an orderable type. Composite keys (per-dialect row-value comparison), keyless
+tables and inferred keys stay on the single-cursor path, and report why via `KeysetEligibility.reason`
+so the ineligible share is measurable before the approach is extended to other dialects.
 """
 
 from __future__ import annotations
@@ -63,10 +63,11 @@ def is_orderable_keyset_type(arrow_type: pa.DataType) -> bool:
 class KeysetNullKeyError(ValueError):
     """A keyset page ended on a NULL key, so the walk has nothing to seek past.
 
-    `resolve_keyset_eligibility` rejects nullable key columns, so reaching this means a driver
-    produced a NULL in a column its schema declared non-nullable. Raised rather than tolerated
-    because both alternatives are worse: re-running the query without the seek predicate would
-    re-read the same page forever, and stopping the walk would silently truncate the load.
+    `resolve_keyset_eligibility` only admits a database-declared primary key, which is `NOT NULL`
+    by definition, so reaching this means a driver decoded a NULL out of one anyway (MySQL's zero
+    dates, '0000-00-00', decode to `None`). Raised rather than tolerated because both alternatives
+    are worse: re-running the query without the seek predicate would re-read the same page forever,
+    and stopping the walk would silently truncate the load.
     """
 
 
@@ -89,6 +90,7 @@ def resolve_keyset_eligibility(
     primary_keys: list[str] | None,
     arrow_schema: pa.Schema,
     should_use_incremental_field: bool,
+    primary_key_is_declared: bool,
 ) -> KeysetEligibility:
     """Decide whether a full load can keyset-resume, and on which primary-key column.
 
@@ -97,19 +99,22 @@ def resolve_keyset_eligibility(
     - the table has exactly one detected primary-key column (composite keys need per-dialect
       row-value comparison — out of scope here);
     - that column is present in the projected Arrow schema with an orderable type; and
-    - that column is non-nullable.
+    - the database actually declared it a primary key (`primary_key_is_declared`).
 
-    The nullability gate is what keeps the seek total. `WHERE pk > :last` can only advance on a key
-    that is always present, and the "primary key" here isn't always one the database declared: a
-    keyless table falls back to an `id` column that may well be nullable. A page ending on a NULL
-    would leave the cursor with nothing to seek past. It also excludes MySQL date/timestamp keys,
-    which are modelled as nullable precisely because zero dates ('0000-00-00') decode to `None` — a
-    NULL boundary in disguise even when the column is declared NOT NULL.
+    That last gate is what keeps the seek total. `WHERE pk > :last` can only advance on a key that
+    is always present, and `primary_keys` is not always a key the database declared — a keyless
+    table falls back to whatever `id` column it has, which may be nullable and full of NULLs. A page
+    ending on a NULL would leave nothing to seek past and the next page would drop the predicate
+    entirely. A declared primary key is `NOT NULL` by definition, which rules that out at the
+    source; callers that infer a key some other way must report `primary_key_is_declared=False`.
     """
     if should_use_incremental_field:
         return KeysetEligibility(reason="incremental_sync")
     if not primary_keys:
         return KeysetEligibility(reason="no_primary_key")
+    if not primary_key_is_declared:
+        # An inferred key (e.g. the keyless-table `id` fallback) carries no NOT NULL guarantee.
+        return KeysetEligibility(reason="undeclared_primary_key")
     if len(primary_keys) != 1:
         return KeysetEligibility(reason="composite_primary_key")
 
@@ -119,8 +124,6 @@ def resolve_keyset_eligibility(
         return KeysetEligibility(reason="primary_key_not_projected")
     if not is_orderable_keyset_type(field.type):
         return KeysetEligibility(reason=f"non_orderable_type:{field.type}")
-    if field.nullable:
-        return KeysetEligibility(reason="nullable_key_column")
     return KeysetEligibility(column=key)
 
 

@@ -15,16 +15,13 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql.query_builder import SelectQueryBuilder
 
-# Keyset keys must be non-nullable, so the columns under test are declared that way explicitly —
-# `pa.field` defaults to nullable=True, which is itself an ineligibility (see `nullable_id`).
 _FIELDS: list[pa.Field] = [
-    pa.field("id", pa.int64(), nullable=False),
-    pa.field("uuid", pa.string(), nullable=False),
-    pa.field("created_at", pa.timestamp("us"), nullable=False),
-    pa.field("amount", pa.decimal128(18, 2), nullable=False),
-    pa.field("active", pa.bool_(), nullable=False),
-    pa.field("day", pa.date32(), nullable=False),
-    pa.field("nullable_id", pa.int64(), nullable=True),
+    pa.field("id", pa.int64()),
+    pa.field("uuid", pa.string()),
+    pa.field("created_at", pa.timestamp("us")),
+    pa.field("amount", pa.decimal128(18, 2)),
+    pa.field("active", pa.bool_()),
+    pa.field("day", pa.date32()),
 ]
 _SCHEMA = pa.schema(_FIELDS)
 
@@ -49,31 +46,32 @@ def test_is_orderable_keyset_type(arrow_type, expected):
 
 
 @pytest.mark.parametrize(
-    "primary_keys,incremental,expected_column,expected_reason",
+    "primary_keys,incremental,declared,expected_column,expected_reason",
     [
-        (["id"], False, "id", None),
-        (["created_at"], False, "created_at", None),
-        (["amount"], False, "amount", None),
+        (["id"], False, True, "id", None),
+        (["created_at"], False, True, "created_at", None),
+        (["amount"], False, True, "amount", None),
         # Incremental syncs already resume from their persisted watermark; keyset would double up.
-        (["id"], True, None, "incremental_sync"),
-        (None, False, None, "no_primary_key"),
-        ([], False, None, "no_primary_key"),
-        (["id", "created_at"], False, None, "composite_primary_key"),
+        (["id"], True, True, None, "incremental_sync"),
+        (None, False, True, None, "no_primary_key"),
+        ([], False, True, None, "no_primary_key"),
+        (["id", "created_at"], False, True, None, "composite_primary_key"),
         # If the PK was projected out of the Arrow schema there's nothing to seek on.
-        (["missing"], False, None, "primary_key_not_projected"),
+        (["missing"], False, True, None, "primary_key_not_projected"),
         # A string/uuid PK sorts by collation, which can skip or duplicate rows across keyset pages.
-        (["uuid"], False, None, "non_orderable_type:string"),
-        (["active"], False, None, "non_orderable_type:bool"),
-        # A nullable key can't be seeked past: a page ending on NULL leaves nothing to compare
-        # against. Reachable via the keyless-table `id` fallback, which need not be a declared PK.
-        (["nullable_id"], False, None, "nullable_key_column"),
+        (["uuid"], False, True, None, "non_orderable_type:string"),
+        (["active"], False, True, None, "non_orderable_type:bool"),
+        # An inferred key (the keyless-table `id` fallback) has no NOT NULL guarantee, so a page
+        # could end on a NULL and leave the seek with nothing to compare against.
+        (["id"], False, False, None, "undeclared_primary_key"),
     ],
 )
-def test_resolve_keyset_eligibility(primary_keys, incremental, expected_column, expected_reason):
+def test_resolve_keyset_eligibility(primary_keys, incremental, declared, expected_column, expected_reason):
     eligibility = resolve_keyset_eligibility(
         primary_keys=primary_keys,
         arrow_schema=_SCHEMA,
         should_use_incremental_field=incremental,
+        primary_key_is_declared=declared,
     )
 
     assert eligibility.column == expected_column
