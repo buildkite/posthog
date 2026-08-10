@@ -37,6 +37,7 @@ from products.tasks.backend.temporal.process_task.sandbox_credentials import (
 )
 from products.tasks.backend.temporal.process_task.utils import (
     PrAuthorshipMode,
+    actor_personal_github_is_usable,
     get_actor_distinct_id,
     get_imported_mcp_server_configs,
     get_pr_authorship_mode,
@@ -52,6 +53,7 @@ from products.tasks.backend.temporal.process_task.utils import (
     mark_sandbox_mcp_session,
     record_message_actor,
     sandbox_identity_scope,
+    upgrade_run_to_user_authorship,
 )
 
 from ee.hogai.sandbox import STOP_REASON_END_TURN, TURN_COMPLETE_METHOD
@@ -502,12 +504,21 @@ def _refresh_sandbox_github(task_run: TaskRun, actor_user: Any, state: dict[str,
         return True
 
     run_id = str(task_run.id)
-    scope = sandbox_identity_scope(run_id, state)
-    if get_sandbox_github_identity_user(scope) == actor_user.id:
-        return True  # sandbox already reflects this actor — cheapest check first
-
     task = task_run.task
+    # A run that started before its actor connected GitHub is bot-authored, and the agent may
+    # have been the one that asked them to connect. Promote it so the turn that follows the
+    # connection is the one that gets their identity.
+    promoted_state = upgrade_run_to_user_authorship(task_run, actor_user, state)
+    if promoted_state is not None:
+        state = promoted_state
+
+    scope = sandbox_identity_scope(run_id, state)
     if get_pr_authorship_mode(task, state) != PrAuthorshipMode.USER:
+        return True
+
+    # The same actor across turns still gets re-checked, so a connection revoked mid-thread
+    # strips the token now rather than whenever the refresh loop next runs.
+    if get_sandbox_github_identity_user(scope) == actor_user.id and actor_personal_github_is_usable(actor_user):
         return True
 
     sandbox = _resolve_live_sandbox(state)
