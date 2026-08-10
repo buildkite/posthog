@@ -13,9 +13,9 @@ with autocommit so no read view or metadata lock is held across the whole load �
 yield to a draining worker between batches.
 
 Eligibility is deliberately narrow (see `resolve_keyset_eligibility`): exactly one primary-key column
-of an orderable type. Composite keys (per-dialect row-value comparison) and keyless tables stay on the
-single-cursor path, and report why via `KeysetEligibility.reason` so the ineligible share is
-measurable before the approach is extended to other dialects.
+of an orderable, non-nullable type. Composite keys (per-dialect row-value comparison) and keyless
+tables stay on the single-cursor path, and report why via `KeysetEligibility.reason` so the ineligible
+share is measurable before the approach is extended to other dialects.
 """
 
 from __future__ import annotations
@@ -60,6 +60,16 @@ def is_orderable_keyset_type(arrow_type: pa.DataType) -> bool:
     )
 
 
+class KeysetNullKeyError(ValueError):
+    """A keyset page ended on a NULL key, so the walk has nothing to seek past.
+
+    `resolve_keyset_eligibility` rejects nullable key columns, so reaching this means a driver
+    produced a NULL in a column its schema declared non-nullable. Raised rather than tolerated
+    because both alternatives are worse: re-running the query without the seek predicate would
+    re-read the same page forever, and stopping the walk would silently truncate the load.
+    """
+
+
 @dataclasses.dataclass(frozen=True)
 class KeysetEligibility:
     """Whether this run can keyset-resume, and if not, why.
@@ -85,8 +95,16 @@ def resolve_keyset_eligibility(
     Eligible only when all of:
     - the sync is a full load (incremental syncs already resume from their persisted watermark);
     - the table has exactly one detected primary-key column (composite keys need per-dialect
-      row-value comparison — out of scope here); and
-    - that column is present in the projected Arrow schema with an orderable type.
+      row-value comparison — out of scope here);
+    - that column is present in the projected Arrow schema with an orderable type; and
+    - that column is non-nullable.
+
+    The nullability gate is what keeps the seek total. `WHERE pk > :last` can only advance on a key
+    that is always present, and the "primary key" here isn't always one the database declared: a
+    keyless table falls back to an `id` column that may well be nullable. A page ending on a NULL
+    would leave the cursor with nothing to seek past. It also excludes MySQL date/timestamp keys,
+    which are modelled as nullable precisely because zero dates ('0000-00-00') decode to `None` — a
+    NULL boundary in disguise even when the column is declared NOT NULL.
     """
     if should_use_incremental_field:
         return KeysetEligibility(reason="incremental_sync")
@@ -101,6 +119,8 @@ def resolve_keyset_eligibility(
         return KeysetEligibility(reason="primary_key_not_projected")
     if not is_orderable_keyset_type(field.type):
         return KeysetEligibility(reason=f"non_orderable_type:{field.type}")
+    if field.nullable:
+        return KeysetEligibility(reason="nullable_key_column")
     return KeysetEligibility(column=key)
 
 
@@ -151,6 +171,12 @@ def iter_keyset_pages(
         yield table
 
         last_value = table.column(keyset_column)[-1].as_py()
+        if last_value is None:
+            # Never fall through to another query: with `last_value` back to None the next page
+            # would carry no seek predicate and return this same page again, indefinitely.
+            raise KeysetNullKeyError(
+                f"Keyset page for '{keyset_column}' ended on a NULL key, so the walk cannot advance"
+            )
         if checkpoint is not None:
             checkpoint(last_value)
         if table.num_rows < chunk_size:

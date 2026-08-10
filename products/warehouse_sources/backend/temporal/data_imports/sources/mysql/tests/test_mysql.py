@@ -899,6 +899,29 @@ class TestKeysetReadPath:
         first_page_params = cursor.execute.call_args_list[0].args[1]
         assert first_page_params["keyset_value"] == 7
 
+    def test_nullable_key_column_stays_on_the_streaming_path(self, keyset_mocks, mocker):
+        """A keyless table falls back to an `id` column that need not be NOT NULL.
+
+        `WHERE id > :last` can't advance past a NULL, so such a table must keep the streaming
+        cursor and report itself non-resumable rather than page on a key that may stall.
+        """
+        mocker.patch.object(MySQLImplementation, "get_primary_keys_for_table", return_value=None)
+        mocker.patch.object(
+            MySQLImplementation,
+            "get_table_metadata",
+            return_value=Table(
+                name="messages",
+                parents=("mydb",),
+                columns=[MySQLColumn(name="id", data_type="int", column_type="int", nullable=True)],
+            ),
+        )
+
+        source = MySQLImplementation().build_pipeline(
+            _make_config(), _make_inputs(), resumable_source_manager=self._fake_manager()
+        )
+
+        assert source.supports_resume is False
+
 
 class TestBuildPipelineSourceLocation:
     def test_uses_schema_metadata_when_schema_is_blank(self, build_pipeline_mocks):

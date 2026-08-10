@@ -8,19 +8,23 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql
     BacktickIdentifierQuoter,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql.keyset import (
+    KeysetNullKeyError,
     is_orderable_keyset_type,
     iter_keyset_pages,
     resolve_keyset_eligibility,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql.query_builder import SelectQueryBuilder
 
+# Keyset keys must be non-nullable, so the columns under test are declared that way explicitly —
+# `pa.field` defaults to nullable=True, which is itself an ineligibility (see `nullable_id`).
 _FIELDS: list[pa.Field] = [
-    pa.field("id", pa.int64()),
-    pa.field("uuid", pa.string()),
-    pa.field("created_at", pa.timestamp("us")),
-    pa.field("amount", pa.decimal128(18, 2)),
-    pa.field("active", pa.bool_()),
-    pa.field("day", pa.date32()),
+    pa.field("id", pa.int64(), nullable=False),
+    pa.field("uuid", pa.string(), nullable=False),
+    pa.field("created_at", pa.timestamp("us"), nullable=False),
+    pa.field("amount", pa.decimal128(18, 2), nullable=False),
+    pa.field("active", pa.bool_(), nullable=False),
+    pa.field("day", pa.date32(), nullable=False),
+    pa.field("nullable_id", pa.int64(), nullable=True),
 ]
 _SCHEMA = pa.schema(_FIELDS)
 
@@ -60,6 +64,9 @@ def test_is_orderable_keyset_type(arrow_type, expected):
         # A string/uuid PK sorts by collation, which can skip or duplicate rows across keyset pages.
         (["uuid"], False, None, "non_orderable_type:string"),
         (["active"], False, None, "non_orderable_type:bool"),
+        # A nullable key can't be seeked past: a page ending on NULL leaves nothing to compare
+        # against. Reachable via the keyless-table `id` fallback, which need not be a declared PK.
+        (["nullable_id"], False, None, "nullable_key_column"),
     ],
 )
 def test_resolve_keyset_eligibility(primary_keys, incremental, expected_column, expected_reason):
@@ -211,3 +218,34 @@ def test_checkpoint_is_optional():
         )
     )
     assert [t.num_rows for t in tables] == [2]
+
+
+def test_null_page_boundary_raises_instead_of_replaying_the_page():
+    """A page ending on a NULL key must stop the walk, not re-issue an unbounded query.
+
+    Without the guard `last_value` falls back to None, the next page is built with no seek
+    predicate, and the same rows come back forever — an unbounded rewrite loop a source owner
+    could trigger with a nullable key column.
+    """
+    queries: list[str] = []
+
+    def run_page(page_sql):
+        queries.append(page_sql.sql)
+        return pa.table({"id": pa.array([1, None], type=pa.int64())})
+
+    walk = iter_keyset_pages(
+        builder=_BUILDER,
+        schema="db",
+        table_name="t",
+        keyset_column="id",
+        chunk_size=2,
+        run_page=run_page,
+        initial_last_value=None,
+    )
+
+    assert next(walk).num_rows == 2  # the page itself is still handed to the consumer
+
+    with pytest.raises(KeysetNullKeyError):
+        next(walk)
+
+    assert len(queries) == 1  # crucially, no second query was ever issued
