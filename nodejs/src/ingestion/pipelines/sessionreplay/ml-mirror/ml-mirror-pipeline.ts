@@ -15,6 +15,7 @@ import {
 } from '~/ingestion/pipelines/sessionreplay'
 import { createAiTrainingOptInFilterStep } from '~/ingestion/pipelines/sessionreplay/ai-training-optin-filter-step'
 import { createProduceCollectedImagesStep } from '~/ingestion/pipelines/sessionreplay/ml-mirror/produce-collected-images-step'
+import { createProduceCollectedUrlsStep } from '~/ingestion/pipelines/sessionreplay/ml-mirror/produce-collected-urls-step'
 import { createParseAndAnonymizeMessageStep } from '~/ingestion/pipelines/sessionreplay/parse-and-anonymize-step'
 import { MessageContext } from '~/ingestion/pipelines/sessionreplay/pipeline-types'
 import { createRecordSessionEventStep } from '~/ingestion/pipelines/sessionreplay/record-session-event-step'
@@ -22,7 +23,7 @@ import { createMarkSeenStep } from '~/ingestion/pipelines/sessionreplay/session-
 import { createResolveRetentionStep } from '~/ingestion/pipelines/sessionreplay/session-batch-resolve-retention-step'
 import { createTrackAndGateStep } from '~/ingestion/pipelines/sessionreplay/session-batch-track-and-gate-step'
 import { createResolveKeyStep } from '~/ingestion/pipelines/sessionreplay/session-resolve-key-step'
-import { MlImageScrubOutput } from '~/ingestion/pipelines/sessionreplay/shared/outputs'
+import { MlImageFetchOutput, MlImageScrubOutput } from '~/ingestion/pipelines/sessionreplay/shared/outputs'
 import { createTeamFilterStep } from '~/ingestion/pipelines/sessionreplay/team-filter-step'
 import { createValidateSessionReplayHeadersStep } from '~/ingestion/pipelines/sessionreplay/validate-headers-step'
 
@@ -33,7 +34,13 @@ export interface MlMirrorPipelineOptions {
 
 /** Enables the image-collection lane: inlined images become refs, originals go to the scrub topic. */
 export interface MlMirrorImageScrubProducer {
-    outputs: IngestionOutputs<MlImageScrubOutput>
+    outputs: IngestionOutputs<MlImageFetchOutput | MlImageScrubOutput>
+    producedRefCacheMax: number
+}
+
+/** Enables the fetch lane's producer: collected URLs go to the fetch topic, keyed by host. */
+export interface MlMirrorUrlFetchProducer {
+    outputs: IngestionOutputs<MlImageFetchOutput | MlImageScrubOutput>
     producedRefCacheMax: number
 }
 
@@ -41,9 +48,8 @@ export interface MlMirrorImageScrubProducer {
  * Which collection lanes the anonymizer runs, and the key they derive their per-team ref prefix
  * from.
  *
- * Separate from {@link MlMirrorImageScrubProducer} because collecting and producing are separate
- * decisions. The URL lane collects and measures before any topic exists, so requiring the scrub
- * producer to be on first would make that measurement impossible to take on its own.
+ * Separate from the two producer settings because collecting and producing are separate decisions.
+ * Collection alone measures; a produce puts original, unscrubbed URLs onto Kafka.
  */
 export interface MlMirrorCollection {
     /** The ML pseudonym HMAC key (also used by the block-metadata sink), for the per-team ref prefix. */
@@ -56,7 +62,8 @@ export function createMlMirrorReplayPipeline(
     config: SessionReplayPipelineConfig,
     mlOptions: MlMirrorPipelineOptions,
     imageScrub?: MlMirrorImageScrubProducer,
-    collection?: MlMirrorCollection
+    collection?: MlMirrorCollection,
+    urlFetch?: MlMirrorUrlFetchProducer
 ): SessionReplayPipeline {
     const {
         outputs,
@@ -175,7 +182,15 @@ export function createMlMirrorReplayPipeline(
                                                               )
                                                           )
                                                         : parsed
-                                                    return withImagesProduced.pipe(
+                                                    const withUrlsProduced = urlFetch
+                                                        ? withImagesProduced.pipe(
+                                                              createProduceCollectedUrlsStep(
+                                                                  urlFetch.outputs,
+                                                                  urlFetch.producedRefCacheMax
+                                                              )
+                                                          )
+                                                        : withImagesProduced
+                                                    return withUrlsProduced.pipe(
                                                         topHogWrapper(
                                                             createRecordSessionEventStep({
                                                                 isDebugLoggingEnabled,
