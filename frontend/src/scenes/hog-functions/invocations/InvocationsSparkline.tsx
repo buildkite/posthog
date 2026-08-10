@@ -1,3 +1,4 @@
+import { useValues } from 'kea'
 import { useCallback, useMemo, useState } from 'react'
 
 import { IconChevronDown } from '@posthog/icons'
@@ -6,6 +7,7 @@ import { LemonButton, SpinnerOverlay } from '@posthog/lemon-ui'
 import { AnyScaleOptions, Sparkline } from 'lib/components/Sparkline'
 import { dayjs } from 'lib/dayjs'
 import { cn } from 'lib/utils/css-classes'
+import { teamLogic } from 'scenes/teamLogic'
 
 import { SparklineData } from './hogInvocationsLogic'
 
@@ -21,6 +23,10 @@ export function InvocationsSparkline({
     onDateRangeChange,
 }: InvocationsSparklineProps): JSX.Element | null {
     const [collapsed, setCollapsed] = useState(false)
+    const { currentTeam } = useValues(teamLogic)
+    // Buckets are cut in the project's timezone, so label them there too —
+    // in the viewer's zone a project-local day can read as the day before.
+    const projectTimezone = currentTeam?.timezone ?? 'UTC'
 
     const { timeUnit, tickFormat } = useMemo(() => {
         const dates = data?.dates ?? []
@@ -47,11 +53,11 @@ export function InvocationsSparkline({
                     maxRotation: 0,
                     maxTicksLimit: 6,
                     font: { size: 10, lineHeight: 1 },
-                    callback: (value: string | number) => dayjs(value).format(tickFormat),
+                    callback: (value: string | number) => dayjs(value).tz(projectTimezone).format(tickFormat),
                 },
                 time: { unit: timeUnit },
             }) as AnyScaleOptions,
-        [timeUnit, tickFormat]
+        [timeUnit, tickFormat, projectTimezone]
     )
 
     const onSelectionChange = useCallback(
@@ -94,7 +100,7 @@ export function InvocationsSparkline({
                             className="w-full h-full"
                             onSelectionChange={onSelectionChange}
                             withXScale={withXScale}
-                            renderLabel={(label) => dayjs(label).format('D MMM YYYY HH:mm')}
+                            renderLabel={(label) => dayjs(label).tz(projectTimezone).format('D MMM YYYY HH:mm')}
                             hideZerosInTooltip
                             sortTooltipByCount
                         />

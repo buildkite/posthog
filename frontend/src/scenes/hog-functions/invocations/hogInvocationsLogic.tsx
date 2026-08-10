@@ -315,6 +315,13 @@ export const resolveDateRange = (filters: {
 }
 
 /**
+ * Timezone every HogQL date expression here resolves in: HogQL wraps DateTime
+ * fields in `toTimeZone(field, team_tz)`, so both the window literals and the
+ * sparkline's bucket boundaries have to be built in the team's zone, not UTC.
+ */
+const teamTimezone = (): string => teamLogic.findMounted()?.values.currentTeam?.timezone ?? 'UTC'
+
+/**
  * Inline date predicate for the inner subquery's WHERE clause. `filtersOverride`
  * doesn't bind to a timestamp field on `hog_invocation_results` (no marker on
  * the schema), so we apply the window directly. UTC + the CH DateTime64 literal
@@ -322,12 +329,9 @@ export const resolveDateRange = (filters: {
  */
 export const dateClauseFor = (filters: HogInvocationsFilters): ReturnType<typeof hogql.raw> => {
     const { start, end } = resolveDateRange(filters)
-    // HogQL interprets bare datetime literals in the *team* timezone (DateTime
-    // fields are compared as toTimeZone(field, team_tz)), so format the window
-    // bounds in the team tz — NOT UTC — or the filter is shifted by the team's
-    // offset for any non-UTC project. Mirrors `toAbsoluteClickhouseTimestamp`.
-    const teamTimezone = teamLogic.findMounted()?.values.currentTeam?.timezone ?? 'UTC'
-    const fmt = (d: dayjs.Dayjs): string => d.tz(teamTimezone).format('YYYY-MM-DD HH:mm:ss.SSS')
+    // Format the window bounds in the team tz — NOT UTC — or the filter is shifted
+    // by the team's offset for any non-UTC project. Mirrors `toAbsoluteClickhouseTimestamp`.
+    const fmt = (d: dayjs.Dayjs): string => d.tz(teamTimezone()).format('YYYY-MM-DD HH:mm:ss.SSS')
     return hogql.raw(`AND scheduled_at >= '${fmt(start)}' AND scheduled_at < '${fmt(end)}'`)
 }
 
@@ -424,47 +428,97 @@ export const buildSearchClause = (
 
 /**
  * Tier selection for the sparkline. Each tier carries both the HogQL bucket
- * expression and the equivalent client-side interval (in ms) so we can
- * generate every bucket boundary in the filter range, not just the ones CH
- * returned data for. Tiers (by total range): <24h minutely, ≤4d 15-min,
- * ≤7d hourly, otherwise daily.
+ * expression and its client-side step, so we can generate every bucket boundary
+ * in the filter range, not just the ones CH returned data for. Tiers (by total
+ * range): <24h minutely, ≤4d 15-min, ≤7d hourly, otherwise daily.
  */
+type SparklineStepUnit = 'minute' | 'hour' | 'day'
 interface SparklineTier {
-    intervalMs: number
+    stepAmount: number
+    stepUnit: SparklineStepUnit
     bucketExpr: string
 }
 const pickSparklineTier = (filters: HogInvocationsFilters): SparklineTier => {
     const { start, end } = resolveDateRange(filters)
     const hours = end.diff(start, 'hour')
     if (hours < 24) {
-        return { intervalMs: 60_000, bucketExpr: 'toStartOfMinute(first_scheduled)' }
+        return { stepAmount: 1, stepUnit: 'minute', bucketExpr: 'toStartOfMinute(first_scheduled)' }
     }
     if (hours <= 4 * 24) {
         return {
-            intervalMs: 15 * 60_000,
+            stepAmount: 15,
+            stepUnit: 'minute',
             bucketExpr: 'toStartOfInterval(first_scheduled, INTERVAL 15 MINUTE)',
         }
     }
     if (hours <= 7 * 24) {
-        return { intervalMs: 60 * 60_000, bucketExpr: 'toStartOfHour(first_scheduled)' }
+        return { stepAmount: 1, stepUnit: 'hour', bucketExpr: 'toStartOfHour(first_scheduled)' }
     }
-    return { intervalMs: 24 * 60 * 60_000, bucketExpr: 'toStartOfDay(first_scheduled)' }
+    return { stepAmount: 1, stepUnit: 'day', bucketExpr: 'toStartOfDay(first_scheduled)' }
 }
 
 /**
- * Walk the filter range and emit every bucket boundary as an ISO string.
- * Snaps to interval-aligned ms (matching CH's epoch-aligned
- * `toStartOfInterval` / `toStartOfMinute` etc.), so the keys we use to look
- * up CH counts line up regardless of timezone formatting.
+ * Snap an instant down to a bucket boundary the way the tier's `toStartOf*`
+ * does, i.e. in the *team* timezone. Snapping on the UTC epoch grid instead
+ * silently loses every bucket for a non-UTC project: `toStartOfDay` returns
+ * local midnight, so nothing matches a UTC midnight key and the whole chart
+ * reads as empty.
  */
-const generateSparklineBuckets = (filters: HogInvocationsFilters, intervalMs: number): string[] => {
+const snapToBucket = (t: dayjs.Dayjs, { stepAmount, stepUnit }: SparklineTier): dayjs.Dayjs => {
+    const local = t.tz(teamTimezone())
+    if (stepUnit === 'minute' && stepAmount > 1) {
+        return local.startOf('hour').add(Math.floor(local.minute() / stepAmount) * stepAmount, 'minute')
+    }
+    return local.startOf(stepUnit)
+}
+
+/** Wall-clock format used to re-resolve a stepped boundary against the project timezone. */
+const BUCKET_WALL_FORMAT = 'YYYY-MM-DD HH:mm:ss'
+/** Enough for the widest tier (a minutely day is 1440); caps an absolute range picked far apart. */
+const MAX_SPARKLINE_BUCKETS = 5000
+
+/**
+ * Walk the filter range and emit every bucket boundary as an ISO string, so the
+ * keys we use to look up CH counts line up with what CH bucketed to.
+ *
+ * The step advances the *wall clock* and then re-resolves it in the project
+ * timezone. Stepping the instant instead breaks at a DST transition, where one
+ * calendar day is 23 or 25 hours: the boundary drifts off local midnight and
+ * stops matching what `toStartOfDay` returned.
+ */
+const generateSparklineBuckets = (filters: HogInvocationsFilters, tier: SparklineTier): string[] => {
     const { start, end } = resolveDateRange(filters)
-    const snap = (t: dayjs.Dayjs): number => Math.floor(t.valueOf() / intervalMs) * intervalMs
+    const timezone = teamTimezone()
+    const first = snapToBucket(start, tier)
     const out: string[] = []
-    for (let ms = snap(start); ms < end.valueOf(); ms += intervalMs) {
-        out.push(dayjs(ms).toISOString())
+    for (let i = 0; i < MAX_SPARKLINE_BUCKETS; i++) {
+        const wall = first.add(i * tier.stepAmount, tier.stepUnit).format(BUCKET_WALL_FORMAT)
+        const boundary = dayjs.tz(wall, timezone)
+        if (boundary.valueOf() >= end.valueOf()) {
+            break
+        }
+        // A wall clock that a spring-forward skips resolves to the next real instant, which can
+        // repeat the previous boundary. Keep the list strictly increasing.
+        if (out.length === 0 || boundary.valueOf() > dayjs(out[out.length - 1]).valueOf()) {
+            out.push(boundary.toISOString())
+        }
     }
     return out
+}
+
+/**
+ * Axis buckets: the walk above supplies the even spine, including buckets with no runs, and
+ * every bucket ClickHouse actually returned is merged in. If the two ever disagree, say on an
+ * ambiguous wall clock in a fall-back hour, the count still renders instead of vanishing.
+ */
+const mergeBucketInstants = (walked: string[], returned: number[]): string[] => {
+    const instants = new Set(walked.map((iso) => dayjs(iso).valueOf()))
+    for (const ms of returned) {
+        instants.add(ms)
+    }
+    return Array.from(instants)
+        .sort((a, b) => a - b)
+        .map((ms) => dayjs(ms).toISOString())
 }
 
 const SPARKLINE_STATUS_COLORS: Record<RunStatus, string> = {
@@ -474,7 +528,8 @@ const SPARKLINE_STATUS_COLORS: Record<RunStatus, string> = {
 }
 
 async function fetchSparkline(props: HogInvocationsLogicProps, filters: HogInvocationsFilters): Promise<SparklineData> {
-    const { intervalMs, bucketExpr } = pickSparklineTier(filters)
+    const tier = pickSparklineTier(filters)
+    const { bucketExpr } = tier
 
     // Filters reference the SELECT aliases (status / error_kind) so we don't
     // re-wrap in argMax inline — that would collide with the alias and
@@ -552,7 +607,7 @@ async function fetchSparkline(props: HogInvocationsLogicProps, filters: HogInvoc
     // Walk every bucket in the filter range — not just the ones CH returned
     // data for — so the chart's x-axis spans the user's selected window even
     // when activity is concentrated in a tiny slice of it.
-    const dates = generateSparklineBuckets(filters, intervalMs)
+    const dates = mergeBucketInstants(generateSparklineBuckets(filters, tier), Object.keys(cellsByMs).map(Number))
     const buildValues = (status: RunStatus): number[] => dates.map((d) => cellsByMs[dayjs(d).valueOf()]?.[status] ?? 0)
     const series: SparklineSeries[] = (['failed', 'running', 'succeeded'] as RunStatus[]).map((status) => ({
         name: status,
