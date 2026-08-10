@@ -68,7 +68,7 @@ These are compatibility checks, not automatic blockers:
 | OpenAI APIs                  | Chat Completions, Responses, bare Responses alias, and normalized router chat.                                                                                     | Audio transcription and broader LiteLLM translation.                                                                                                                   |
 | Anthropic APIs               | Messages and token counting, including Bedrock-hosted models.                                                                                                      | OpenAI models exposed through the Anthropic shape and Python-specific Bedrock opt-in behavior.                                                                         |
 | Providers                    | OpenAI, Anthropic, Azure OpenAI, Bedrock, and selected Modal models.                                                                                               | OpenRouter, Fireworks, Cloudflare Workers AI, and Baseten.                                                                                                             |
-| Models                       | Gateway-owned catalog, canonical IDs and aliases, capability checks, and router categories.                                                                        | Broader LiteLLM model acceptance and Python product allowlists.                                                                                                        |
+| Models                       | Gateway-owned catalog, canonical IDs and aliases, capability checks, router categories, and OpenRouter-shaped pricing.                                              | Broader LiteLLM model acceptance, Python product allowlists, and product-scoped model pricing.                                                                          |
 | Routing and failure behavior | Health-based host choice, circuit breakers, hosted-provider failover, and strict provider pinning.                                                                 | Caller opt-in Bedrock fallback and provider-specific Python routing.                                                                                                   |
 | Event metadata               | One `X-PostHog-Properties` JSON object plus dedicated distinct ID, trace ID, and provider headers.                                                                 | `X-POSTHOG-PROPERTY-*` and `X-POSTHOG-FLAG-*` headers.                                                                                                                 |
 | Session attribution          | No native session header on main. [PostHog/ai-gateway#383](https://github.com/PostHog/ai-gateway/pull/383) adds `X-PostHog-Session-Id`.                            | The per-key property header can emit `$ai_session_id`.                                                                                                                 |
@@ -87,10 +87,10 @@ Run `/migrating-llm-gateway-callers` to inventory and convert a caller.
 
 Run `/auditing-llm-gateway-parity` after either gateway changes auth, attribution, billing, endpoints, providers, models, routing, or event metadata. The skill audits implementation sources in both repositories and updates this file without migrating callers.
 
-Last verified on 2026-08-06 against:
+Last verified on 2026-08-10 against:
 
-- `PostHog/posthog` master at `64bcdbd983585d754d6a8e5c975f0a0122eb6510`
-- `PostHog/ai-gateway` main at `e2e28a738e701d107e57d12c6ed244a50af2b2ac`
+- `PostHog/posthog` master at `d191a1a69151b278953640437857b5390ce2ba1b`
+- `PostHog/ai-gateway` main at `de0094020b615f5afc207a71e1c54d3e1df95374`
 
 ## References
 
