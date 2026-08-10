@@ -28,7 +28,13 @@ from products.tasks.backend.logic.services.connection_token import (
     get_primary_sandbox_jwt_kid,
     get_sandbox_jwt_public_key,
 )
-from products.tasks.backend.logic.services.sandbox import ExecutionResult, Sandbox, SandboxConfig, SandboxTemplate
+from products.tasks.backend.logic.services.sandbox import (
+    ExecutionResult,
+    Sandbox,
+    SandboxConfig,
+    SandboxTemplate,
+    workload_for_origin_product,
+)
 from products.tasks.backend.logic.services.sandbox_usage import open_sandbox_session
 from products.tasks.backend.models import SandboxSnapshot, Task, TaskRun
 from products.tasks.backend.temporal.metrics import (
@@ -579,6 +585,7 @@ def create_sandbox_for_repository(input: CreateSandboxForRepositoryInput) -> Cre
         config = SandboxConfig(
             name=prepared.sandbox_name,
             template=SandboxTemplate.VM_BASE if use_vm_sandbox else SandboxTemplate.DEFAULT_BASE,
+            workload=workload_for_origin_product(ctx.origin_product),
             custom_image_name=ctx.custom_image_name if use_vm_sandbox else None,
             environment_variables=prepared.environment_variables,
             snapshot_id=prepared.snapshot_id,

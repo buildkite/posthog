@@ -427,7 +427,7 @@ class TestModalSandboxAgentServer:
         mock_modal_sandbox.create_connect_token.return_value = mock_credentials
 
         config = SandboxConfig(name="test-sandbox")
-        with patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()):
+        with patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()):
             return ModalSandbox(sandbox=mock_modal_sandbox, config=config)
 
     @pytest.fixture(autouse=True)
@@ -1100,7 +1100,7 @@ class TestModalSandboxCreateAllowlist:
         mock_sb.object_id = "sb-created"
         with (
             patch("products.tasks.backend.logic.services.modal_sandbox.modal.enable_output"),
-            patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()),
+            patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()),
             patch("products.tasks.backend.logic.services.modal_sandbox._get_template_image", return_value=MagicMock()),
             patch(
                 "products.tasks.backend.logic.services.modal_sandbox.modal.Sandbox.create", return_value=mock_sb
@@ -1152,7 +1152,7 @@ class TestModalSandboxCreateImageFallback:
 
         with (
             patch("products.tasks.backend.logic.services.modal_sandbox.modal.enable_output"),
-            patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()),
+            patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()),
             patch(
                 "products.tasks.backend.logic.services.modal_sandbox._get_template_image",
                 return_value=MagicMock(name="base"),
@@ -1222,7 +1222,7 @@ class TestModalSandboxCreateImageFallback:
 
         with (
             patch("products.tasks.backend.logic.services.modal_sandbox.modal.enable_output"),
-            patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()),
+            patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()),
             patch(
                 "products.tasks.backend.logic.services.modal_sandbox._get_template_image",
                 return_value=MagicMock(name="base"),
@@ -1360,7 +1360,7 @@ class TestLaunchDevStackBootstrap:
             snapshot_restored=snapshot_restored,
             **({"snapshot_kind": snapshot_kind} if snapshot_kind is not None else {}),
         )
-        with patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()):
+        with patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()):
             return ModalSandbox(sandbox=mock_modal_sandbox, config=config)
 
     @pytest.mark.parametrize(
@@ -1538,7 +1538,7 @@ class TestModalSandboxCreateSnapshot:
         mock_modal_sandbox.poll.return_value = None  # None => still running
 
         config = SandboxConfig(name="test-sandbox")
-        with patch.object(ModalSandbox, "_get_app_for_template", return_value=MagicMock()):
+        with patch.object(ModalSandbox, "_get_app_for_config", return_value=MagicMock()):
             return ModalSandbox(sandbox=mock_modal_sandbox, config=config)
 
     def test_create_snapshot_success(self, mock_sandbox: Any):
