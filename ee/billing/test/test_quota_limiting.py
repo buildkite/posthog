@@ -35,6 +35,7 @@ from ee.billing.quota_limiting import (
     refresh_org_self_driving_quota,
     replace_limited_team_tokens,
     set_org_usage_summary,
+    team_quota_limited_until,
     update_all_orgs_billing_quotas,
     update_org_billing_quotas,
     update_organization_usage_fields,
@@ -1795,12 +1796,13 @@ class TestQuotaLimiting(BaseTest):
 
     def test_usage_keys_stay_in_sync(self):
         """
-        Ensure QuotaResource, UsageCounters, and OrganizationUsageInfo all use the same keys (except for `period`).
+        Ensure QuotaResource, UsageCounters, and OrganizationUsageInfo all use the same keys
+        (except for `period` and `has_active_subscription`).
         """
         from posthog.models.organization import OrganizationUsageInfo
 
-        # OrganizationUsageInfo is source of truth (excluding 'period``)
-        org_usage_keys = set(OrganizationUsageInfo.__annotations__.keys()) - {"period"}
+        # OrganizationUsageInfo is source of truth (excluding 'period` and `has_active_subscription`)
+        org_usage_keys = set(OrganizationUsageInfo.__annotations__.keys()) - {"period", "has_active_subscription"}
 
         quota_resource_keys = {resource.value for resource in QuotaResource}
         usage_counter_keys = set(UsageCounters.__annotations__.keys())
@@ -3069,3 +3071,57 @@ class TestRefreshOrgSelfDrivingQuota(BaseTest):
         with patch("ee.billing.quota_limiting.get_self_driving_credits_used_in_period_for_org") as live_mock:
             refresh_org_self_driving_quota(str(self.organization.id))
         live_mock.assert_not_called()
+
+
+class TestApiQueriesFreeTierLimit(BaseTest):
+    def _usage(self, limit, has_active_subscription):
+        usage = {
+            "api_queries_read_bytes": {"usage": 500_000_000_000_000, "limit": limit, "todays_usage": 0},
+            "period": ["2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z"],
+        }
+        if has_active_subscription is not None:
+            usage["has_active_subscription"] = has_active_subscription
+        return usage
+
+    @parameterized.expand(
+        [
+            # (billing_limit, has_active_subscription, expect_limited)
+            ("billing_limit_wins_even_when_free", 1, False, True),  # tiny billing limit, over it
+            ("free_org_gets_default", None, False, True),  # usage 500e12 > default 400e12
+            ("paying_org_never_injected", None, True, False),
+            ("unknown_subscription_never_injected", None, None, False),
+        ]
+    )
+    def test_limit_resolution_matrix(self, _name, billing_limit, has_active_subscription, expect_limited):
+        self.organization.usage = self._usage(billing_limit, has_active_subscription)
+        self.organization.save()
+        result = org_quota_limited_until(self.organization, QuotaResource.API_QUERIES, [])
+        if expect_limited:
+            assert result is not None
+        else:
+            assert result is None
+
+    @override_settings(API_QUERIES_FREE_TIER_READ_BYTES_LIMIT=0)
+    def test_zero_setting_disables_default(self):
+        self.organization.usage = self._usage(None, False)
+        self.organization.save()
+        assert org_quota_limited_until(self.organization, QuotaResource.API_QUERIES, []) is None
+
+
+class TestTeamQuotaLimitedUntil(BaseTest):
+    def test_returns_score_for_limited_token(self):
+        future = int(timezone.now().timestamp()) + 3600
+        add_limited_team_tokens(
+            QuotaResource.API_QUERIES, {"phc_test_token": future}, QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY
+        )
+        assert team_quota_limited_until("phc_test_token", QuotaResource.API_QUERIES) == future
+
+    def test_returns_none_for_unknown_token(self):
+        assert team_quota_limited_until("phc_never_limited", QuotaResource.API_QUERIES) is None
+
+    def test_returns_none_for_expired_score(self):
+        past = int(timezone.now().timestamp()) - 60
+        add_limited_team_tokens(
+            QuotaResource.API_QUERIES, {"phc_expired_token": past}, QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY
+        )
+        assert team_quota_limited_until("phc_expired_token", QuotaResource.API_QUERIES) is None

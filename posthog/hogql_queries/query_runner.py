@@ -7,6 +7,8 @@ from time import perf_counter
 from types import UnionType
 from typing import Any, Generic, NamedTuple, Optional, Protocol, TypeGuard, TypeVar, Union, cast, get_args, get_origin
 
+from django.conf import settings as django_settings
+
 import orjson
 import posthoganalytics
 from prometheus_client import Counter, Histogram
@@ -116,6 +118,7 @@ from posthog.clickhouse.query_tagging import get_query_tag_value, is_api_key_acc
 from posthog.constants import AvailableFeature
 from posthog.errors import QueryErrorCategory, classify_query_error, clickhouse_error_type
 from posthog.event_usage import AnalyticsProps, groups, report_user_or_team_action
+from posthog.exceptions import APIQueriesQuotaExceeded
 from posthog.exceptions_capture import capture_exception
 from posthog.hogql_queries.access_controlled_resources import queried_access_controlled_resources
 from posthog.hogql_queries.insights.utils.breakdowns import has_multi_breakdown, has_single_breakdown
@@ -319,7 +322,9 @@ class SharedExecutionSettings(NamedTuple):
     cache_age_seconds: int | None
 
 
-def shared_insights_execution_mode(execution_mode: ExecutionMode) -> SharedExecutionSettings:
+def shared_insights_execution_mode(
+    execution_mode: ExecutionMode, team: Optional[Team] = None
+) -> SharedExecutionSettings:
     """Map a requested execution mode to the one allowed on shared/embedded resources.
 
     Returns the mode plus an optional `cache_age_seconds` override for the query runner.
@@ -327,7 +332,16 @@ def shared_insights_execution_mode(execution_mode: ExecutionMode) -> SharedExecu
     staleness threshold: a cached result younger than the window is served as-is, anything
     older (or missing) recomputes synchronously — throttling forced recomputes without a
     separate clock.
+
+    Pass `team` so an organization over its API queries quota degrades to cached-only
+    results: shared links are public, and would otherwise let anyone keep triggering
+    fresh calculations for an over-quota org.
     """
+    if team is not None and get_api_queries_quota_limited_until(team) is not None:
+        if _api_queries_enforcement_enabled(team):
+            API_QUERIES_QUOTA_LIMITED_COUNTER.labels(surface="shared", outcome="enforced").inc()
+            return SharedExecutionSettings(ExecutionMode.CACHE_ONLY_NEVER_CALCULATE, None)
+        API_QUERIES_QUOTA_LIMITED_COUNTER.labels(surface="shared", outcome="observed").inc()
     if execution_mode == ExecutionMode.CALCULATE_BLOCKING_ALWAYS:
         return SharedExecutionSettings(
             ExecutionMode.RECENT_CACHE_CALCULATE_BLOCKING_IF_STALE,
@@ -335,6 +349,72 @@ def shared_insights_execution_mode(execution_mode: ExecutionMode) -> SharedExecu
         )
     return SharedExecutionSettings(
         _SHARED_MODE_WHITELIST.get(execution_mode, ExecutionMode.EXTENDED_CACHE_CALCULATE_ASYNC_IF_STALE), None
+    )
+
+
+API_QUERIES_QUOTA_ENFORCEMENT_FLAG = "api-queries-quota-enforcement"
+
+API_QUERIES_QUOTA_LIMITED_COUNTER = Counter(
+    "posthog_api_queries_quota_limited_total",
+    "Query executions for teams whose organization is over its api_queries_read_bytes quota.",
+    labelnames=["surface", "outcome"],  # surface: api | shared; outcome: observed | enforced
+)
+
+
+def get_api_queries_quota_limited_until(team: Team) -> Optional[datetime]:
+    """When the team's organization is over its API queries (bytes read) quota, returns the
+    moment the limit lifts; otherwise None.
+
+    A cached "limited" verdict is confirmed against Redis directly before it counts, so a
+    just-cleared verdict (e.g. right after an upgrade) can never block. Fails open on error.
+    """
+    if not django_settings.EE_AVAILABLE or not django_settings.API_QUERIES_ENABLED:
+        return None
+    try:
+        from ee.billing.quota_limiting import (  # noqa: PLC0415 — EE availability is runtime-conditional
+            QuotaLimitingCaches,
+            QuotaResource,
+            list_limited_team_attributes,
+            team_quota_limited_until,
+        )
+
+        if team.api_token not in list_limited_team_attributes(
+            QuotaResource.API_QUERIES, QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY
+        ):
+            return None
+        limited_until = team_quota_limited_until(team.api_token, QuotaResource.API_QUERIES)
+        if limited_until is None:
+            return None
+        return datetime.fromtimestamp(limited_until, tz=UTC)
+    except Exception:
+        return None
+
+
+def _api_queries_enforcement_enabled(team: Team) -> bool:
+    """Whether blocking (vs observe-only) is on for this org. Fails open to observe-only."""
+    try:
+        return bool(
+            posthoganalytics.feature_enabled(
+                API_QUERIES_QUOTA_ENFORCEMENT_FLAG,
+                str(team.organization_id),
+                groups={"organization": str(team.organization_id)},
+                group_properties={"organization": {"id": str(team.organization_id)}},
+                only_evaluate_locally=False,
+                send_feature_flag_events=False,
+            )
+        )
+    except Exception:
+        return False
+
+
+def _api_queries_quota_detail(team: Team, limited_until: datetime) -> str:
+    summary = (team.organization.usage or {}).get("api_queries_read_bytes") or {}
+    used = (summary.get("usage") or 0) + (summary.get("todays_usage") or 0)
+    limit = summary.get("limit") or django_settings.API_QUERIES_FREE_TIER_READ_BYTES_LIMIT
+    return (
+        f"Your organization has used {used:,} of {limit:,} bytes of its API query allowance this billing period "
+        f"(figures as of the last usage sweep). The allowance resets at {limited_until.isoformat()}. "
+        "Upgrade your plan in Billing settings to restore access sooner, or ask an org admin to do so."
     )
 
 
@@ -1777,6 +1857,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
 
         if self.is_query_service:
             tag_queries(chargeable=1)
+            self._enforce_api_queries_quota()
 
         with (
             get_materialized_endpoints_rate_limiter().run(
@@ -2221,7 +2302,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
 
     def get_api_queries_concurrency_limit(self):
         """
-        :return: None - no feature, 0 - rate limited, 1,3,<other> for actual concurrency limit
+        :return: None - no feature, 1,3,<other> for actual concurrency limit
         """
 
         # TODO - remove once no longer needed, as per https://posthog.slack.com/archives/C075D3C5HST/p1766275591753869
@@ -2233,15 +2314,23 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
 
         from posthog.constants import AvailableFeature
 
-        from ee.billing.quota_limiting import QuotaLimitingCaches, QuotaResource, list_limited_team_attributes
-
-        if self.team.api_token in list_limited_team_attributes(
-            QuotaResource.API_QUERIES, QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY
-        ):
-            return 0
-
         feature = self.team.organization.get_available_feature(AvailableFeature.API_QUERIES_CONCURRENCY)
         return feature.get("limit") if feature else None
+
+    def _enforce_api_queries_quota(self) -> None:
+        """402 chargeable API queries for orgs over quota, when enforcement is flagged on.
+
+        Observe-only (counter, no block) when the flag is off. Never blocks without a
+        direct-Redis confirmation of the verdict.
+        """
+        limited_until = get_api_queries_quota_limited_until(self.team)
+        if limited_until is None:
+            return
+        if not _api_queries_enforcement_enabled(self.team):
+            API_QUERIES_QUOTA_LIMITED_COUNTER.labels(surface="api", outcome="observed").inc()
+            return
+        API_QUERIES_QUOTA_LIMITED_COUNTER.labels(surface="api", outcome="enforced").inc()
+        raise APIQueriesQuotaExceeded(detail=_api_queries_quota_detail(self.team, limited_until))
 
     @abstractmethod
     def to_query(self) -> ast.SelectQuery | ast.SelectSetQuery:

@@ -42,7 +42,7 @@ class OrganizationUsageResource(TypedDict):
 
 # The "usage" field is essentially cached info from the Billing Service to be used for visual reporting to the user
 # as well as for enforcing limits.
-# These keys must match QuotaResource and UsageCounters (except for `period`).
+# These keys must match QuotaResource and UsageCounters (except for `period` and `has_active_subscription`).
 class OrganizationUsageInfo(TypedDict):
     events: OrganizationUsageResource | None
     exceptions: OrganizationUsageResource | None
@@ -67,6 +67,7 @@ class OrganizationUsageInfo(TypedDict):
     logs_mb_ingested: OrganizationUsageResource | None
     replay_vision_credits: OrganizationUsageResource | None
     period: list[str] | None
+    has_active_subscription: bool | None
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

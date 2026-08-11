@@ -503,6 +503,7 @@ class BillingManager:
                     data["billing_period"]["current_period_start"],
                     data["billing_period"]["current_period_end"],
                 ],
+                has_active_subscription=data.get("has_active_subscription"),
             )
 
             had_quota_limiting_markers = _has_quota_limiting_markers(organization.usage)

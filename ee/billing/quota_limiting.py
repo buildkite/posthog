@@ -219,6 +219,19 @@ def list_limited_team_attributes(resource: QuotaResource, cache_key: QuotaLimiti
     return [x.decode("utf-8") for x in results]
 
 
+def team_quota_limited_until(team_attribute: str, resource: QuotaResource) -> Optional[int]:
+    """Direct Redis read of one team's quota verdict, bypassing the 30s process cache.
+
+    Returns epoch seconds when the limit lifts, or None when not limited (or expired).
+    Callers use this to confirm a cached "limited" verdict before acting on it.
+    """
+    redis_client = get_client()
+    score = redis_client.zscore(f"{QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY.value}{resource.value}", team_attribute)
+    if score is None or score < timezone.now().timestamp():
+        return None
+    return int(score)
+
+
 def list_team_attributes_in_zset(resource: QuotaResource, cache_key: QuotaLimitingCaches) -> list[str]:
     """
     Returns every team attribute currently present in the Redis zset for `resource`,
@@ -311,6 +324,20 @@ def _signals_credited_refund_offset(organization: Organization, resource: QuotaR
     return get_signals_credited_refund_credits_for_org(organization.id, period_start, period_end)
 
 
+def _api_queries_free_tier_limit(organization: Organization) -> Optional[int]:
+    """Default api_queries_read_bytes limit for orgs on the free tier.
+
+    Applies only when billing sent no explicit limit and the last billing sync recorded
+    has_active_subscription=False. Unknown subscription status injects nothing (fail open).
+    """
+    if not settings.API_QUERIES_FREE_TIER_READ_BYTES_LIMIT:
+        return None
+    usage = organization.usage or {}
+    if usage.get("has_active_subscription") is False:
+        return int(settings.API_QUERIES_FREE_TIER_READ_BYTES_LIMIT)
+    return None
+
+
 def org_quota_limited_until(
     organization: Organization,
     resource: QuotaResource,
@@ -328,6 +355,9 @@ def org_quota_limited_until(
     limit = summary.get("limit")
     quota_limited_until = summary.get("quota_limited_until", None)
     quota_limiting_suspended_until = summary.get("quota_limiting_suspended_until", None)
+
+    if limit is None and resource == QuotaResource.API_QUERIES:
+        limit = _api_queries_free_tier_limit(organization)
 
     # Credited-path signals PR refunds free the org's quota slot posthog-side (billing's stored
     # usage still contains the refunded units). Consulted only when the raw comparison is already

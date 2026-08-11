@@ -280,6 +280,7 @@ class TestBillingManager(BaseTest):
                 "limit": 100,
                 "todays_usage": 5,
             },
+            "has_active_subscription": None,
         }
 
     @patch("posthoganalytics.capture")
@@ -684,6 +685,37 @@ class TestBillingManager(BaseTest):
             BillingManager(license).deauthorize(self.organization, BillingProvider.VERCEL)
 
         assert "Open invoices must be resolved first" in str(context.exception)
+
+    def test_update_org_details_persists_has_active_subscription(self):
+        organization = self.organization
+        billing_status = {
+            "customer": {
+                "has_active_subscription": False,
+                "usage_summary": {
+                    "events": {"usage": 90, "limit": 1000},
+                    "exceptions": {"usage": 10, "limit": 100},
+                    "recordings": {"usage": 15, "limit": 100},
+                    "rows_synced": {"usage": 45, "limit": 500},
+                    "rows_exported": {"usage": 10, "limit": 1000},
+                    "feature_flag_requests": {"usage": 25, "limit": 300},
+                    "api_queries_read_bytes": {"usage": 1000, "limit": 1000000},
+                    "llm_events": {"usage": 50, "limit": 1000},
+                    "ai_credits": {"usage": 1200, "limit": 20000, "todays_usage": 150},
+                    "survey_responses": {"usage": 10, "limit": 100},
+                    "cdp_trigger_events": {"usage": 10, "limit": 100},
+                    "workflow_emails": {"usage": 100, "limit": 10000},
+                    "workflow_destinations_dispatched": {"usage": 50, "limit": 10000},
+                    "logs_mb_ingested": {"usage": 5500, "limit": 50000},
+                },
+                "billing_period": {
+                    "current_period_start": "2026-08-01T00:00:00Z",
+                    "current_period_end": "2026-09-01T00:00:00Z",
+                },
+            }
+        }
+        BillingManager(license=None).update_org_details(organization, cast(BillingStatus, billing_status))
+        organization.refresh_from_db()
+        assert organization.usage["has_active_subscription"] is False
 
 
 class TestBillingProviderWebhookSigning(SimpleTestCase):

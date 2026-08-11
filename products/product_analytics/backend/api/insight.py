@@ -1324,6 +1324,7 @@ class InsightSerializer(InsightBasicSerializer):
                     self.context["request"],
                     surface=self.context.get("compute_surface", ComputeSurface.LEGACY_UNKNOWN),
                     is_shared=is_shared,
+                    team=insight.team if is_shared else None,
                 )
                 filters_override = filters_override_requested_by_client(
                     self.context["request"], dashboard, is_shared=is_shared
