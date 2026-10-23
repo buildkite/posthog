@@ -48,7 +48,7 @@
     "@expo/metro-runtime": "~57.0.7",
     "@expo/ui": "57.0.7",
     "@modelcontextprotocol/ext-apps": "^1.2.2",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@posthog/api-client": "workspace:*",
     "@posthog/core": "workspace:*",
     "@posthog/shared": "workspace:*",

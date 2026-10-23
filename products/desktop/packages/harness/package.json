@@ -97,7 +97,7 @@
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-coding-agent": "catalog:",
     "@earendil-works/pi-tui": "catalog:",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@posthog/shared": "workspace:*",
     "lru-cache": "^11.1.0",
     "turndown": "^7.2.4",
