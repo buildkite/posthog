@@ -18,7 +18,7 @@
   "dependencies": {
     "@json-render/core": "^0.19.0",
     "@modelcontextprotocol/ext-apps": "^1.1.2",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@pierre/diffs": "^1.2.10",
     "@posthog/agent": "workspace:*",
     "@posthog/api-client": "workspace:*",
